@@ -9,6 +9,7 @@ from pyomo.environ import (
     NonNegativeReals,
     Reals,
     Binary,
+    value
 )
 from pareto.utilities.get_data import get_data
 from importlib import resources
@@ -18,7 +19,9 @@ import pyomo.environ
 from pyomo.common.config import ConfigBlock, ConfigValue, In
 from enum import Enum
 
-from pareto.utilities.solvers import get_solver
+from pareto.utilities.solvers import get_solver, set_timeout
+
+import pandas as pd
 
 
 def create_model(df_sets, df_parameters):
@@ -58,20 +61,20 @@ def create_model(df_sets, df_parameters):
         doc="Connectivity between locations and available transport modes",
     )
 
-    model.p_completionsdemand = Param(
-        model.s_L,
-        model.s_T,
-        default=0,
-        initialize=df_parameters["CompletionsDemand"],
-        doc="Water demand for completion operations in location l and time period t",
-    )
+    # model.p_completionsdemand = Param(
+    #     model.s_L,
+    #     model.s_T,
+    #     default=0,
+    #     initialize=df_parameters["CompletionsDemand"],
+    #     doc="Water demand for completion operations in location l and time period t",
+    # )
 
-    model.p_customersdemand = Param(
+    model.p_demand = Param(
         model.s_L,
         model.s_T,
         default=0,
-        initialize=df_parameters["CustomersDemand"],
-        doc="Water required by customers in location l and time period t",
+        initialize=df_parameters["Demand"],
+        doc="Water required for completion operations and customers in location l and time period t",
     )
 
     model.p_disposalcost = Param(
@@ -152,6 +155,7 @@ def create_model(df_sets, df_parameters):
     model.v_D = Var(
         model.s_L,
         model.s_T,
+        initialize=0,
         within=NonNegativeReals,
         doc="Water demand at location l in time period t",
     )
@@ -159,6 +163,7 @@ def create_model(df_sets, df_parameters):
     model.v_P = Var(
         model.s_L,
         model.s_T,
+        initialize=0,
         within=NonNegativeReals,
         doc="Water production at location l in time period t",
     )
@@ -168,6 +173,7 @@ def create_model(df_sets, df_parameters):
         model.s_G,
         model.s_L,
         model.s_T,
+        initialize=0,
         within=NonNegativeReals,
         doc="Water transportation between locations l and l', via transport mode g in time period t",
     )
@@ -175,6 +181,7 @@ def create_model(df_sets, df_parameters):
     model.v_S = Var(
         model.s_L,
         model.s_T,
+        initialize=0,
         within=NonNegativeReals,
         doc="Water sotrage at location l in time period t",
     )
@@ -332,54 +339,19 @@ def create_model(df_sets, df_parameters):
         model.s_F, model.s_T, rule=fresh_water_rule
     )
 
-    # PRODUCED WATER FLOWBACK/PRODUCTION PROFILES
-    # def water_profiles_rule(m, l, t):
-    #     if l in m.s_P:
-    #         return m.v_P[l, t] == m.p_waterprofiles[l, t]
-    #     elif l in m.s_N or l in m.s_S or l in m.s_C or l in m.s_K:
-    #         return m.v_P[l, t] == 0
-    #     else:
-    #         return Constraint.Skip
-
-    # model.water_profiles_constraint = Constraint(
-    #     model.s_P, model.s_T, rule=water_profiles_rule
-    # )
-
-    # The previous constraint "water_profiles_constraint" can be replace by the following code in which the variable v_P is fixed to
-    # the already known production profiles for pads or to zero for locations that do not produce water
+    # The following code fixes the variable v_P to he already known production profiles
+    # for pads or to zero for locations that do not produce water
     # This helps in reducing the number of decision variables
     for i in model.v_P:
-        if i[0] in model.s_P:
+        if not i[0] in model.s_F:
             model.v_P[i].fix(model.p_waterprofiles[i])
-        elif not (i[0] in model.s_F):
-            model.v_P[i].fix(0)
 
-    # PRODUCED WATER DEMAND FOR COMPLETION OPERATIONS
-    # def completion_demand_rule(m, l, t):
-    #     return m.v_D[l, t] == m.p_completionsdemand[l, t]
-
-    # model.completion_demand_constraint = Constraint(
-    #     model.s_CP, model.s_T, rule=completion_demand_rule
-    # )
-
-    # CUSTOMERS DEMAND
-    # def customers_demand_rule(m, l, t):
-    #     return m.v_D[l, t] == m.p_customersdemand[l, t]
-
-    # model.customers_demand_constraint = Constraint(
-    #     model.s_C, model.s_T, rule=customers_demand_rule
-    # )
-
-    # The previous constraints "completion_demand_constraint" and "customers_demand_constraint" can be replace by the following code in which the variable v_D is fixed to
-    # the already known water demand for completion operations and water demand from customers. The variable is set to zero for locations that do not demand water
-    # This helps in reducing the number of decision variables
+    # The following code fixes the variable v_D to the already known water demand
+    # for completion operations and water demand from customers. This helps in reducing the number of decision variables.
+    # The variable is not fixed for disposal sites since the disposal is calcuated as "demand"
     for i in model.v_D:
-        if i[0] in model.s_CP:
-            model.v_D[i].fix(model.p_completionsdemand[i])
-        elif i[0] in model.s_C:
-            model.v_D[i].fix(model.p_customersdemand[i])
-        else:
-            model.v_D[i].fix(0)
+        if not i[0] in model.s_K:
+            model.v_D[i].fix(model.p_demand[i])
 
     # TRANSPORT CAPACITY
     def transport_capacity_rule(m, l, g, l_tilde, t):
@@ -394,10 +366,7 @@ def create_model(df_sets, df_parameters):
 
     # STORAGE CAPACITY
     def storage_capacity_rule(m, l, t):
-        if l in m.s_P or l in m.s_S:
-            return m.v_S[l, t] <= m.p_storage[l]
-        else:
-            return Constraint.Skip
+        return m.v_S[l, t] <= m.p_storage[l]
 
     model.storage_capacity_constraint = Constraint(
         model.s_L, model.s_T, rule=storage_capacity_rule
@@ -436,8 +405,7 @@ if __name__ == "__main__":
 
     parameter_list = [
         "Topology",
-        "CompletionsDemand",
-        "CustomersDemand",
+        "Demand",
         "DisposalCost",
         "FreshWaterAvailability",
         "FreshWaterCost",
@@ -449,7 +417,41 @@ if __name__ == "__main__":
         "WaterProfiles",
     ]
 
-    with resources.path("pareto.case_studies", "blending_problem.xlsx") as fpath:
+    with resources.path("pareto.case_studies", "small_blending_problem.xlsx") as fpath:
         [df_sets, df_parameters] = get_data(fpath, set_list, parameter_list)
 
     model = create_model(df_sets, df_parameters)
+
+    solver = get_solver("gurobi_direct", "gurobi")
+    set_timeout(solver, timeout_s=60)
+    solver.options["mipgap"] = 0
+
+    results = solver.solve(model, tee=True)
+
+    # PRINTING RESULTS
+
+    Q_results = []
+    P_results = []
+    D_results = []
+    S_results = []
+
+    Q_results = [(l, g, l_tilde, t, value(v)) for (l, g, l_tilde, t), v in model.v_Q.items()]
+    P_results = [(l, t, value(v)) for (l, t), v in model.v_P.items()]
+    D_results = [(l, t, value(v)) for (l, t), v in model.v_D.items()]
+    S_results = [(l, t, value(v)) for (l, t), v in model.v_S.items()]
+
+    Q_df = pd.DataFrame(Q_results, columns=["origin","mode", "destination","time","variable value"])
+    P_df = pd.DataFrame(P_results, columns=["origin", "time", "variable value"])
+    D_df = pd.DataFrame(D_results, columns=["origin", "time", "variable value"])
+    S_df = pd.DataFrame(S_results, columns=["origin", "time", "variable value"])
+
+
+    with pd.ExcelWriter("results.xlsx") as writer:
+        Q_df.to_excel(writer, sheet_name="Transfers")
+        P_df.to_excel(writer, sheet_name="Production")
+        D_df.to_excel(writer, sheet_name="Demand")
+        S_df.to_excel(writer, sheet_name="Storage")
+
+    print("end")
+
+    
