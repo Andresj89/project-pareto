@@ -9,7 +9,7 @@ from pyomo.environ import (
     NonNegativeReals,
     Reals,
     Binary,
-    value
+    value,
 )
 from pareto.utilities.get_data import get_data
 from importlib import resources
@@ -362,50 +362,50 @@ def create_model(df_sets, df_parameters):
     def component_material_balance_rule(m, l, t):
         if t == model.s_T.first():
             return (
-                m.v_P[l, t]*m.p_prodcomp[l,t]
+                m.v_P[l, t] * m.p_prodcomp[l, t]
                 + sum(
                     sum(
-                        m.v_Q[l_tilde, g, l, t]*m.v_COMP[l_tilde,t]
+                        m.v_Q[l_tilde, g, l, t] * m.v_COMP[l_tilde, t]
                         for l_tilde in m.s_L
                         if m.p_topology[l_tilde, g, l]
                     )
                     for g in m.s_G
                 )
-                + m.p_init_storage[l]*m.p_storeageinitcomp[l]
-                == m.v_D[l, t]*m.v_COMP[l,t]
+                + m.p_init_storage[l] * m.p_storeageinitcomp[l]
+                == m.v_D[l, t] * m.v_COMP[l, t]
                 + sum(
                     sum(
-                        m.v_Q[l, g, l_tilde, t]*m.v_COMP[l,t]
+                        m.v_Q[l, g, l_tilde, t] * m.v_COMP[l, t]
                         for l_tilde in m.s_L
                         if m.p_topology[l, g, l_tilde]
                     )
                     for g in m.s_G
                 )
-                + m.v_S[l, t]*m.v_COMP[l,t]
+                + m.v_S[l, t] * m.v_COMP[l, t]
             )
 
         else:
             return (
-                m.v_P[l, t]*m.p_prodcomp[l,t]
+                m.v_P[l, t] * m.p_prodcomp[l, t]
                 + sum(
                     sum(
-                        m.v_Q[l_tilde, g, l, t]*m.v_COMP[l_tilde,t]
+                        m.v_Q[l_tilde, g, l, t] * m.v_COMP[l_tilde, t]
                         for l_tilde in m.s_L
                         if m.p_topology[l_tilde, g, l]
                     )
                     for g in m.s_G
                 )
-                + m.v_S[l, m.s_T.prev(t)]*m.v_COMP[l,m.s_T.prev(t)]
-                == m.v_D[l, t]*m.v_COMP[l,t]
+                + m.v_S[l, m.s_T.prev(t)] * m.v_COMP[l, m.s_T.prev(t)]
+                == m.v_D[l, t] * m.v_COMP[l, t]
                 + sum(
                     sum(
-                        m.v_Q[l, g, l_tilde, t]*m.v_COMP[l,t]
+                        m.v_Q[l, g, l_tilde, t] * m.v_COMP[l, t]
                         for l_tilde in m.s_L
                         if m.p_topology[l, g, l_tilde]
                     )
                     for g in m.s_G
                 )
-                + m.v_S[l, t]*m.v_COMP[l,t]
+                + m.v_S[l, t] * m.v_COMP[l, t]
             )
 
     model.component_material_balance = Constraint(
@@ -497,7 +497,7 @@ if __name__ == "__main__":
         "TransportDistances",
         "WaterProfiles",
         "ProdComp",
-        "StorageInitComp"
+        "StorageInitComp",
     ]
 
     with resources.path("pareto.case_studies", "small_blending_problem.xlsx") as fpath:
@@ -506,7 +506,7 @@ if __name__ == "__main__":
     model = create_model(df_sets, df_parameters)
 
     solver = get_solver("gurobi_direct", "gurobi")
-    set_timeout(solver, timeout_s=60*10)
+    set_timeout(solver, timeout_s=60 * 10)
     solver.options["mipgap"] = 0
     solver.options["NonConvex"] = 2
 
@@ -535,18 +535,21 @@ if __name__ == "__main__":
     S_results = []
     COMP_results = []
 
-    Q_results = [(l, g, l_tilde, t, value(v)) for (l, g, l_tilde, t), v in model.v_Q.items()]
+    Q_results = [
+        (l, g, l_tilde, t, value(v)) for (l, g, l_tilde, t), v in model.v_Q.items()
+    ]
     P_results = [(l, t, value(v)) for (l, t), v in model.v_P.items()]
     D_results = [(l, t, value(v)) for (l, t), v in model.v_D.items()]
     S_results = [(l, t, value(v)) for (l, t), v in model.v_S.items()]
     COMP_results = [(l, t, value(v)) for (l, t), v in model.v_COMP.items()]
 
-    Q_df = pd.DataFrame(Q_results, columns=["origin","mode", "destination","time","variable value"])
+    Q_df = pd.DataFrame(
+        Q_results, columns=["origin", "mode", "destination", "time", "variable value"]
+    )
     P_df = pd.DataFrame(P_results, columns=["origin", "time", "variable value"])
     D_df = pd.DataFrame(D_results, columns=["origin", "time", "variable value"])
     S_df = pd.DataFrame(S_results, columns=["origin", "time", "variable value"])
     COMP_df = pd.DataFrame(COMP_results, columns=["origin", "time", "variable value"])
-
 
     with pd.ExcelWriter("blendin_problem_results.xlsx") as writer:
         Q_df.to_excel(writer, sheet_name="Transfers")
@@ -556,5 +559,3 @@ if __name__ == "__main__":
         COMP_df.to_excel(writer, sheet_name="Composition")
 
     print("end")
-
-    
